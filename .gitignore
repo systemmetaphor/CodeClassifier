@@ -5,3 +5,4 @@ CodeClassifier.sln.DotSettings
 *.suo
 NaiveBayesClassifier/obj/
 NaiveBayesClassifier/bin/
+.vs
