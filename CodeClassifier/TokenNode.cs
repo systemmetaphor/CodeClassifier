@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
-using CodeClassifier.StringTokenizer;
+using CodeClassification.StringTokenizer;
 
-namespace CodeClassifier
+namespace CodeClassification
 {
 	public class TokenNode
 	{

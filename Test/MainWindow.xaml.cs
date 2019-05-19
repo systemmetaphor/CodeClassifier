@@ -51,7 +51,7 @@ namespace Test
 
 		    double certainty;
             Dictionary<string, double> scores;
-			string bestLanguage = CodeClassifier.CodeClassifier.Classify(InputString, out certainty, out scores);
+			string bestLanguage = CodeClassification.CodeClassifier.Classify(InputString, out certainty, out scores);
 			string languagesAndScores = "";
 
 			KeyValuePair<string, double> maxLanguage = scores.Aggregate((l, r) => l.Value > r.Value ? l : r);

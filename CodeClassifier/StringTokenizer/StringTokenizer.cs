@@ -12,7 +12,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 
-namespace CodeClassifier.StringTokenizer
+namespace CodeClassification.StringTokenizer
 {
 	/// <summary>
 	/// StringTokenizer tokenized string (or stream) into tokens.

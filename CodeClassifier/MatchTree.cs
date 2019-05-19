@@ -1,4 +1,4 @@
-﻿namespace CodeClassifier
+﻿namespace CodeClassification
 {
 	class MatchTree
 	{

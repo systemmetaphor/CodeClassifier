@@ -4,11 +4,10 @@ using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.ExceptionServices;
-using System.Xml.Schema;
-using CodeClassifier.StringTokenizer;
+using System.Text;
+using CodeClassification.StringTokenizer;
 
-namespace CodeClassifier
+namespace CodeClassification
 {
     public class CodeClassifier
     {
@@ -16,55 +15,39 @@ namespace CodeClassifier
 
         private const double SCORE_MULTIPLIER_PER_LEVEL = 2;
         private const double SCORE_MULTIPLIER_FOR_EXACT_MATCH = 5;
-
         private const double MIN_TOKEN_FREQ_PER_FILE = 2;
-
         private const double FREQ_SCORE_MULTIPLIER = 20;
-        
+
         private static List<MatchTree> _matchTrees;
         private static HashSet<string> _uniqueTokenSet;
         private static Dictionary<string, Dictionary<string, double>> _tokenFreqPerLanguage;
 
         private CodeClassifier()
         {
-            string trainingSetPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-            if (trainingSetPath == null)
-            {
-                throw new DirectoryNotFoundException("Could not find the training-set folder.");
-            }
-
-            // Train Verhelst MatchTree classifier
-            string path = Path.Combine(trainingSetPath, "training-set");
-
             // unique tokens list
             _uniqueTokenSet = new HashSet<string>();
             _matchTrees = new List<MatchTree>();
-
             _tokenFreqPerLanguage = new Dictionary<string, Dictionary<string, double>>();
 
-            string[] folders = Directory.GetDirectories(path);
-            foreach (string languageFolder in folders)
+            TrainClassifier(LoadFromResources());
+        }
+
+        private static void TrainClassifier(Dictionary<string, List<Token>> parsedTokens)
+        {
+            // key => language name, value => tokens
+            foreach (var kvp in parsedTokens)
             {
-                string[] files = Directory.GetFiles(languageFolder);
+
                 TokenNode rootNode = null;
                 double totalPossibleScore = 0;
-                string languageName = Path.GetFileNameWithoutExtension(languageFolder) ?? "undefined";
-
                 Dictionary<string, double> tokenFreq = new Dictionary<string, double>();
-
-                string allFilesContent = "";
-                foreach (string filePath in files)
-                {
-                    allFilesContent += File.ReadAllText(filePath);
-                }
-                List<Token> tokens = GetAllTokens(allFilesContent);
 
                 // Verhelst algo
                 // Calculate the total possible score to normalize the score results
-                rootNode = BuildMatchTree(tokens, out totalPossibleScore);
+                rootNode = BuildMatchTree(kvp.Value, out totalPossibleScore);
 
                 // Frequency algorithm
-                foreach (KeyValuePair<string, double> keyValuePair in BuildFrequencyTable(tokens))
+                foreach (KeyValuePair<string, double> keyValuePair in BuildFrequencyTable(kvp.Value))
                 {
                     // Sumize all frequencies for files of the same language
                     if (!tokenFreq.ContainsKey(keyValuePair.Key))
@@ -74,11 +57,101 @@ namespace CodeClassifier
                     tokenFreq[keyValuePair.Key] += keyValuePair.Value;
                 }
 
-
-                _matchTrees.Add(new MatchTree(rootNode, languageName, totalPossibleScore));
-
-                _tokenFreqPerLanguage.Add(languageName, tokenFreq);
+                _matchTrees.Add(new MatchTree(rootNode, kvp.Key, totalPossibleScore));
+                _tokenFreqPerLanguage.Add(kvp.Key, tokenFreq);
             }
+        }
+
+        public static string TrainingSetPath
+        {
+            get
+            {
+                string trainingSetPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+                if (trainingSetPath == null)
+                {
+                    throw new DirectoryNotFoundException("Could not find the training-set folder.");
+                }
+
+                // Train Verhelst MatchTree classifier
+                string path = Path.Combine(trainingSetPath, "training-set");
+                return path;
+            }
+        }
+
+        private static Dictionary<string, List<Token>> LoadFromFileSystem()
+        {
+            var parsedTokens = new Dictionary<string, List<Token>>();
+            string path = TrainingSetPath;
+
+            string[] folders = Directory.GetDirectories(path);
+            foreach (string languageFolder in folders)
+            {
+
+
+                string[] files = Directory.GetFiles(languageFolder);
+                string languageName = Path.GetFileNameWithoutExtension(languageFolder) ?? "undefined";
+
+                string allFilesContent = "";
+                foreach (string filePath in files)
+                {
+                    allFilesContent += File.ReadAllText(filePath);
+                }
+
+                List<Token> tokens = GetAllTokens(allFilesContent);
+                parsedTokens.Add(languageName, tokens);
+            }
+
+            return parsedTokens;
+        }
+
+        private static Dictionary<string, List<Token>> LoadFromResources()
+        {
+            var result = new Dictionary<string, List<Token>>();
+
+            var assembly = typeof(CodeClassifier).Assembly;
+            var unfilteredResourceNames = assembly.GetManifestResourceNames();
+            var trainingSetResourceNames = unfilteredResourceNames.Where(n => n.IndexOf("training_set", StringComparison.OrdinalIgnoreCase) >= 0).ToArray();
+
+            var languageTexts = new Dictionary<string, List<string>>();
+
+            foreach (var trainingResourceName in trainingSetResourceNames)
+            {
+                var nameTokens = trainingResourceName.Split('.');
+                var languageName = nameTokens.Length > 2 ? nameTokens[2] : null;
+                if (string.IsNullOrWhiteSpace(languageName))
+                {
+                    continue;
+                }
+
+                using (Stream stream = assembly.GetManifestResourceStream(trainingResourceName))
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    string languageText = reader.ReadToEnd();
+
+                    if (!languageTexts.ContainsKey(languageName))
+                    {
+                        languageTexts[languageName] = new List<string>();
+                    }
+
+                    languageTexts[languageName].Add(languageText);
+                }
+            }
+
+            foreach(var languageName in languageTexts.Keys)
+            {
+                var textBuilder = new StringBuilder();
+                var textParts = languageTexts[languageName];
+                foreach (var text in textParts)
+                {
+                    textBuilder.Append(text);
+                    textBuilder.Append(Environment.NewLine);
+                }
+
+                List<Token> tokens = GetAllTokens(textBuilder.ToString());
+                result.Add(languageName, tokens);
+            }
+                        
+            return result;
         }
 
         private static Dictionary<string, double> BuildFrequencyTable(List<Token> tokens)
@@ -113,12 +186,21 @@ namespace CodeClassifier
             }
 
             // Normalize frequencies [0-1]
-            double maxTokenFreq = filteredTokenFrequencies.Values.Max();
+            double maxTokenFreq = filteredTokenFrequencies.Count > 0 ? filteredTokenFrequencies.Values.Max() : 0;
             List<string> keys = filteredTokenFrequencies.Keys.ToList();
             foreach (string key in keys)
             {
-                filteredTokenFrequencies[key] /= maxTokenFreq;
+                // prevent a divide by zero exception
+                if (maxTokenFreq == 0)
+                {
+                    filteredTokenFrequencies[key] = 0;
+                }
+                else
+                {
+                    filteredTokenFrequencies[key] /= maxTokenFreq;
+                }
             }
+
             return filteredTokenFrequencies;
         }
 
@@ -215,7 +297,7 @@ namespace CodeClassifier
             scores = new Dictionary<string, double>();
             foreach (string language in scoresTp.Keys.ToList())
             {
-                scores[language] = scoresTp[language]*certTp + scoresMt[language]*certMt;
+                scores[language] = scoresTp[language] * certTp + scoresMt[language] * certMt;
             }
 
 
@@ -289,7 +371,7 @@ namespace CodeClassifier
         {
             Dictionary<string, double> snippletTokenFreqs = BuildFrequencyTable(GetAllTokens(snippet));
             scores = new Dictionary<string, double>();
-            
+
             double maxScore = 0;
             string bestMatchLanguage = "";
             foreach (string language in _tokenFreqPerLanguage.Keys)
@@ -304,9 +386,10 @@ namespace CodeClassifier
                     if (trainingFreq == 0 && snippletFreq == 0)
                     {
                         languageScore += 1;
-                    } else if (trainingFreq != 0 && snippletFreq != 0)
+                    }
+                    else if (trainingFreq != 0 && snippletFreq != 0)
                     {
-                        languageScore += (1 - Math.Abs(trainingFreq - snippletFreq))*FREQ_SCORE_MULTIPLIER;
+                        languageScore += (1 - Math.Abs(trainingFreq - snippletFreq)) * FREQ_SCORE_MULTIPLIER;
                     }
                 }
                 scores.Add(language, languageScore);

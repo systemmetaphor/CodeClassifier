@@ -8,7 +8,7 @@
  *
  **********************************************************/
 
-namespace CodeClassifier.StringTokenizer
+namespace CodeClassification.StringTokenizer
 {
 	public enum TokenKind
 	{
